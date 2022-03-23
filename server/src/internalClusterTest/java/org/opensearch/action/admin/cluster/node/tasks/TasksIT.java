@@ -612,6 +612,21 @@ public class TasksIT extends OpenSearchIntegTestCase {
         );
     }
 
+    public void ttttt() throws Exception {
+        waitForCompletionTestCase(
+            false,
+            id -> client().admin().cluster().prepareGetTask(id).setWaitForCompletion(true).execute(),
+            response -> {
+                assertTrue(response.getTask().isCompleted());
+                // We didn't store the result so it won't come back when we wait
+                assertNull(response.getTask().getResponse());
+                // But the task's details should still be there because we grabbed a reference to the task before waiting for it to complete
+                assertNotNull(response.getTask().getTask());
+                assertEquals(TestTaskPlugin.TestTaskAction.NAME, response.getTask().getTask().getAction());
+            }
+        );
+    }
+
     public void testGetTaskWaitForCompletionWithStoringResult() throws Exception {
         waitForCompletionTestCase(
             true,
