@@ -40,6 +40,8 @@ import org.opensearch.common.settings.Setting.Property;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.node.Node;
+import org.opensearch.threadpool.RunnableTaskExecutionListener;
+import org.opensearch.threadpool.TaskAwareRunnable;
 
 import java.util.List;
 import java.util.Optional;
@@ -55,6 +57,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -206,11 +209,11 @@ public class OpenSearchExecutors {
     /**
      * Return a new executor that will automatically adjust the queue size based on queue throughput.
      *
-     * @param size number of fixed threads to use for executing tasks
+     * @param size                 number of fixed threads to use for executing tasks
      * @param initialQueueCapacity initial size of the executor queue
-     * @param minQueueSize minimum queue size that the queue can be adjusted to
-     * @param maxQueueSize maximum queue size that the queue can be adjusted to
-     * @param frameSize number of tasks during which stats are collected before adjusting queue size
+     * @param minQueueSize         minimum queue size that the queue can be adjusted to
+     * @param maxQueueSize         maximum queue size that the queue can be adjusted to
+     * @param frameSize            number of tasks during which stats are collected before adjusting queue size
      */
     public static OpenSearchThreadPoolExecutor newAutoQueueFixed(
         String name,
@@ -221,7 +224,8 @@ public class OpenSearchExecutors {
         int frameSize,
         TimeValue targetedResponseTime,
         ThreadFactory threadFactory,
-        ThreadContext contextHolder
+        ThreadContext contextHolder,
+        AtomicReference<RunnableTaskExecutionListener> runnableTaskListener
     ) {
         if (initialQueueCapacity <= 0) {
             throw new IllegalArgumentException(
@@ -232,6 +236,17 @@ public class OpenSearchExecutors {
             ConcurrentCollections.<Runnable>newBlockingQueue(),
             initialQueueCapacity
         );
+
+        Function<Runnable, WrappedRunnable> runnableWrapper;
+        if (runnableTaskListener != null) {
+            runnableWrapper = (runnable) -> {
+                TaskAwareRunnable taskAwareRunnable = new TaskAwareRunnable(contextHolder, runnable, runnableTaskListener);
+                return new TimedRunnable(taskAwareRunnable);
+            };
+        } else {
+            runnableWrapper = TimedRunnable::new;
+        }
+
         return new QueueResizingOpenSearchThreadPoolExecutor(
             name,
             size,
@@ -241,7 +256,7 @@ public class OpenSearchExecutors {
             queue,
             minQueueSize,
             maxQueueSize,
-            TimedRunnable::new,
+            runnableWrapper,
             frameSize,
             targetedResponseTime,
             threadFactory,
