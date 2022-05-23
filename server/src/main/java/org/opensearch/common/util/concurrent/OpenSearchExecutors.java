@@ -187,9 +187,30 @@ public class OpenSearchExecutors {
         ThreadFactory threadFactory,
         ThreadContext contextHolder
     ) {
+        return newResizable(name, size, queueCapacity, threadFactory, contextHolder, null);
+    }
+
+    public static OpenSearchThreadPoolExecutor newResizable(
+        String name,
+        int size,
+        int queueCapacity,
+        ThreadFactory threadFactory,
+        ThreadContext contextHolder,
+        AtomicReference<RunnableTaskExecutionListener> runnableTaskListener
+    ) {
 
         if (queueCapacity <= 0) {
             throw new IllegalArgumentException("queue capacity for [" + name + "] executor must be positive, got: " + queueCapacity);
+        }
+
+        Function<Runnable, WrappedRunnable> runnableWrapper;
+        if (runnableTaskListener != null) {
+            runnableWrapper = (runnable) -> {
+                TaskAwareRunnable taskAwareRunnable = new TaskAwareRunnable(contextHolder, runnable, runnableTaskListener);
+                return new TimedRunnable(taskAwareRunnable);
+            };
+        } else {
+            runnableWrapper = TimedRunnable::new;
         }
 
         return new QueueResizableOpenSearchThreadPoolExecutor(
@@ -199,7 +220,7 @@ public class OpenSearchExecutors {
             0,
             TimeUnit.MILLISECONDS,
             new ResizableBlockingQueue<>(ConcurrentCollections.<Runnable>newBlockingQueue(), queueCapacity),
-            TimedRunnable::new,
+            runnableWrapper,
             threadFactory,
             new OpenSearchAbortPolicy(),
             contextHolder
