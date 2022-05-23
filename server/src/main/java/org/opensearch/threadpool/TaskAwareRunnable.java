@@ -36,6 +36,9 @@ public class TaskAwareRunnable extends AbstractRunnable implements WrappedRunnab
     private final ThreadContext threadContext;
     private final AtomicReference<RunnableTaskExecutionListener> runnableTaskListener;
 
+    private Long taskId;
+    private boolean markedFinished = false;
+
     public TaskAwareRunnable(
         final ThreadContext threadContext,
         final Runnable original,
@@ -48,6 +51,7 @@ public class TaskAwareRunnable extends AbstractRunnable implements WrappedRunnab
 
     @Override
     public void onFailure(Exception e) {
+        taskExecutionFinished();
         ExceptionsHelper.reThrowIfNotNull(e);
     }
 
@@ -58,6 +62,7 @@ public class TaskAwareRunnable extends AbstractRunnable implements WrappedRunnab
 
     @Override
     public void onRejection(final Exception e) {
+        taskExecutionFinished();
         if (original instanceof AbstractRunnable) {
             ((AbstractRunnable) original).onRejection(e);
         } else {
@@ -68,7 +73,7 @@ public class TaskAwareRunnable extends AbstractRunnable implements WrappedRunnab
     @Override
     protected void doRun() throws Exception {
         assert runnableTaskListener.get() != null : "Listener should be attached";
-        Long taskId = threadContext.getTransient(TASK_ID);
+        taskId = threadContext.getTransient(TASK_ID);
         if (Objects.nonNull(taskId)) {
             runnableTaskListener.get().taskExecutionStartedOnThread(taskId, currentThread().getId());
         } else {
@@ -77,9 +82,14 @@ public class TaskAwareRunnable extends AbstractRunnable implements WrappedRunnab
         try {
             original.run();
         } finally {
-            if (Objects.nonNull(taskId)) {
-                runnableTaskListener.get().taskExecutionFinishedOnThread(taskId, currentThread().getId());
-            }
+            taskExecutionFinished();
+        }
+    }
+
+    private void taskExecutionFinished(){
+        if (Objects.nonNull(taskId) && markedFinished == false) {
+            markedFinished = true;
+            runnableTaskListener.get().taskExecutionFinishedOnThread(taskId, currentThread().getId());
         }
     }
 
